@@ -65,6 +65,9 @@ gateway startup, bootstrap conversation, file verification, and reporting.
 > sampling (temperature, top-p, etc.). The scores above represent the model's
 > performance *during this benchmark* — your own results may be better or worse
 > on any given run.
+>
+> 💡 **Want to see the exact prompts used?** Check out the [Prompt variants](#prompt-variants)
+> section below — you can use these as templates for your own bootstrap ritual.
 
 ### Test hardware
 
