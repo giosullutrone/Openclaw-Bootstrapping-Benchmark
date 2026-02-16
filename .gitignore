@@ -1,3 +1,11 @@
+# Benchmark results
+results/benchmark_*.json
+!results/benchmark_latest.json
+!results/latest.md
+
+# Temp environments
+/tmp_*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

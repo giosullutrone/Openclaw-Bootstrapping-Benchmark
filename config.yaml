@@ -1,0 +1,292 @@
+# ──────────────────────────────────────────────────────────────
+# OpenClaw Bootstrapping Benchmark – Configuration
+# ──────────────────────────────────────────────────────────────
+#
+# This file controls every aspect of the benchmark: which models
+# to test, what prompts to send, how many runs to perform, and
+# how the OpenClaw gateway is configured.
+#
+# ─── Environment-variable interpolation ──────────────────────
+#
+# Any string value supports env-var substitution at load time:
+#
+#   "${MY_SECRET_KEY}"      → replaced with $MY_SECRET_KEY
+#   "${VAR:-fallback}"      → uses "fallback" if $VAR is unset
+#   "ollama"                → literal strings are left as-is
+#
+# This lets you keep real API keys in your shell environment
+# rather than hard-coding them here.
+#
+#
+# ─── Prompt variants ─────────────────────────────────────────
+#
+# Each model is benchmarked with every prompt variant listed
+# below.  A variant is a named list of messages sent to the
+# agent (usually just one message for a single-shot benchmark).
+#
+# The four built-in variants cover two independent dimensions:
+#
+#   STYLE (how the information is formatted):
+#     natural     – Conversational, flowing prose.
+#     structured  – Bullet-point / labelled-field format.
+#
+#   GUIDANCE (how much the model is told about the process):
+#     guided      – Explicitly names the target files
+#                   (IDENTITY.md, USER.md, SOUL.md) and tells
+#                   the model to delete BOOTSTRAP.md.
+#     unguided    – Provides only the identity data; the model
+#                   must read BOOTSTRAP.md on its own and figure
+#                   out what to do.
+#
+# Result tables include a "Variant" column so you can compare
+# how each model handles different prompt styles and guidance.
+#
+# You can freely add, remove, or rename variants.  The key
+# (e.g. "natural-guided") becomes the variant label in reports.
+# Each variant's value is a YAML list of prompt strings — use
+# a single entry for a one-shot benchmark.
+#
+prompt_variants:
+
+  # ── Natural + Guided ───────────────────────────────────────
+  # Conversational tone.  Tells the model exactly which files to
+  # write and to delete BOOTSTRAP.md.
+  natural-guided:
+    - |
+      Hey there! I'd like to get everything configured right away so we
+      can skip the back-and-forth. Here's who I am and who I'd like you
+      to be:
+
+      I'm Alex, based in Europe/Rome. I like my answers concise and
+      direct — no filler, no fluff, just helpful and to the point.
+
+      For your identity, I'd like you to go by Coral. You're a space
+      lobster with a warm, casual vibe, and your emoji is 🦞.
+
+      Please take all of this and write it into the right places:
+      put your identity details (name, creature, vibe, emoji) in
+      IDENTITY.md, my info (name, timezone) in USER.md, and update
+      SOUL.md to reflect your personality. Once everything is written,
+      go ahead and delete BOOTSTRAP.md to signal that setup is complete.
+
+      Do it all now in one go — no follow-up questions needed.
+
+  # ── Natural + Unguided ─────────────────────────────────────
+  # Conversational tone.  Gives the data but says nothing about
+  # which files to write or that BOOTSTRAP.md should be deleted.
+  natural-unguided:
+    - |
+      Hi! I'd love to get started. Here's a bit about me and how I'd
+      like things to work:
+
+      My name is Alex and I'm in the Europe/Rome timezone. I prefer
+      concise, direct answers without unnecessary padding.
+
+      As for you, I'd like you to call yourself Coral. You're a space
+      lobster — warm and casual in tone, and your emoji is 🦞.
+
+      That should be everything you need to get going. Take it from
+      here!
+
+  # ── Structured + Guided ────────────────────────────────────
+  # Bullet-point layout.  Names the files and deletion step.
+  structured-guided:
+    - |
+      Here is everything you need to complete the bootstrap setup:
+
+      **About me (the user):**
+      - Name: Alex
+      - Timezone: Europe/Rome
+      - Preferences: concise answers, no filler, direct and helpful
+
+      **About you (the agent):**
+      - Name: Coral
+      - Creature: space lobster
+      - Vibe: warm and casual
+      - Emoji: 🦞
+
+      Please write all of this to the appropriate files: identity
+      details in IDENTITY.md, user info in USER.md, and update
+      SOUL.md to reflect your personality. Delete BOOTSTRAP.md
+      when you're done.
+      Do it all now in one go — no follow-up questions needed.
+
+  # ── Structured + Unguided ──────────────────────────────────
+  # Bullet-point layout.  Data only — no file or deletion hints.
+  structured-unguided:
+    - |
+      Here is the information for the initial setup:
+
+      **User:**
+      - Name: Alex
+      - Timezone: Europe/Rome
+      - Preferences: concise answers, no filler, direct and helpful
+
+      **Agent:**
+      - Name: Coral
+      - Creature: space lobster
+      - Vibe: warm and casual
+      - Emoji: 🦞
+
+
+# ─── Timing & retry settings ─────────────────────────────────
+#
+# agent_turn_timeout
+#   Max seconds to wait for a single agent turn (one prompt →
+#   one response) to complete.  If the model is still generating
+#   after this many seconds, the turn is aborted.
+#   Increase for very large or slow models.
+#
+agent_turn_timeout: 1800
+
+# bootstrap_timeout
+#   Max total wall-clock seconds for the entire bootstrap
+#   conversation (all turns combined).  For a single-prompt
+#   benchmark this is effectively the same as agent_turn_timeout,
+#   but it caps the total time if you add multi-turn variants.
+#
+bootstrap_timeout: 3000
+
+# retries
+#   How many extra attempts to give a run if it fails due to
+#   infrastructure issues (install failure, connection error,
+#   model timeout, gateway not starting, etc.).
+#   Retries do NOT apply when the model responds normally but
+#   doesn't complete the bootstrap correctly — that result is
+#   kept as-is since it reflects the model's actual ability.
+#   Set to 0 for no retries (1 attempt total).
+#
+retries: 3
+
+# runs_per_model
+#   How many independent runs to perform per model × variant
+#   combination.  Each run creates a fresh isolated environment
+#   from scratch.  The reported score is the average across all
+#   runs.  Higher values give more statistically stable results
+#   but take proportionally longer.
+#   Can be overridden on the CLI with --runs / -r.
+#
+runs_per_model: 5
+
+
+# ─── Gateway settings ────────────────────────────────────────
+#
+# The OpenClaw gateway is a local HTTP server that routes agent
+# requests to your model server.  The benchmark starts and stops
+# it automatically for each run.
+#
+# gateway.port
+#   TCP port the gateway listens on.  Change this if 18789 is
+#   already in use (e.g. by another OpenClaw instance).
+#   Pre-flight checks will warn you if the port is busy.
+#
+# gateway.bind
+#   Network interface to bind to.  "loopback" means 127.0.0.1
+#   only — the gateway is never reachable from the network.
+#
+gateway:
+  port: 18789
+  bind: loopback
+
+
+# ─── Models to benchmark ─────────────────────────────────────
+#
+# Each entry defines one model to test.  The benchmark runs
+# every model × every prompt variant × runs_per_model times.
+#
+# Required fields:
+#   name           – Label shown in reports.  Use the exact
+#                    Ollama model ID (e.g. "glm-4.7-flash:bf16")
+#                    so readers can copy-paste it into
+#                    `ollama pull <name>`.
+#   base_url       – OpenAI-compatible API root
+#                    (e.g. http://localhost:11434/v1 for Ollama).
+#   model_id       – The model identifier your server expects
+#                    (e.g. "llama3.1:8b" for Ollama).
+#
+# Optional fields (with defaults):
+#   provider       – "custom" for any OpenAI-compatible server.
+#                    (default: "custom")
+#   auth_choice    – Authentication method.
+#                    (default: "custom-api-key")
+#   api_key        – Sent as the Bearer token.  Ollama ignores
+#                    this so any value works.  Supports ${VAR}
+#                    interpolation.
+#                    (default: "")
+#   compatibility  – "openai" | "anthropic" | "unknown".
+#                    Tells OpenClaw which chat-completion format
+#                    to use.
+#                    (default: "openai")
+#   context_window – Token context-window size.  Auto-detected
+#                    from Ollama when the base_url points at
+#                    localhost:11434.  Override here if
+#                    auto-detection gives the wrong value.
+#                    Clamped to 16 000–128 000 regardless of
+#                    what the model or server reports.
+#                    (default: 128000)
+#
+models:
+  - name: "glm-4.7-flash:bf16"
+    provider: "custom"
+    auth_choice: "custom-api-key"
+    base_url: "http://localhost:11434/v1"
+    model_id: "glm-4.7-flash:bf16"
+    api_key: "${OLLAMA_API_KEY:-ollama}"
+    compatibility: "openai"
+    # context_window: 131072  # auto-detected from Ollama; uncomment to override
+
+  - name: "glm-4.7-flash:latest"
+    provider: "custom"
+    auth_choice: "custom-api-key"
+    base_url: "http://localhost:11434/v1"
+    model_id: "glm-4.7-flash:latest"
+    api_key: "${OLLAMA_API_KEY:-ollama}"
+    compatibility: "openai"
+    # context_window: 131072
+
+  - name: "qwen3-coder-next:q8_0"
+    provider: "custom"
+    auth_choice: "custom-api-key"
+    base_url: "http://localhost:11434/v1"
+    model_id: "qwen3-coder-next:q8_0"
+    api_key: "${OLLAMA_API_KEY:-ollama}"
+    compatibility: "openai"
+    # context_window: 131072
+
+  - name: "qwen3-coder-next:latest"
+    provider: "custom"
+    auth_choice: "custom-api-key"
+    base_url: "http://localhost:11434/v1"
+    model_id: "qwen3-coder-next:latest"
+    api_key: "${OLLAMA_API_KEY:-ollama}"
+    compatibility: "openai"
+    # context_window: 131072
+
+  - name: "gpt-oss:20b"
+    provider: "custom"
+    auth_choice: "custom-api-key"
+    base_url: "http://localhost:11434/v1"
+    model_id: "gpt-oss:20b"
+    api_key: "${OLLAMA_API_KEY:-ollama}"
+    compatibility: "openai"
+    # context_window: 131072
+
+  # ── Examples for other servers ─────────────────────────────
+  #
+  # Ollama (default):
+  # - name: "my-model"
+  #   base_url: "http://localhost:11434/v1"
+  #   model_id: "my-model:latest"
+  #   api_key: "${OLLAMA_API_KEY:-ollama}"
+  #
+  # LM Studio:
+  # - name: "mistral-nemo-12b"
+  #   base_url: "http://localhost:1234/v1"
+  #   model_id: "mistral-nemo-instruct-2407"
+  #   api_key: "lm-studio"
+  #
+  # vLLM:
+  # - name: "codellama-34b"
+  #   base_url: "http://localhost:8000/v1"
+  #   model_id: "codellama/CodeLlama-34b-Instruct-hf"
+  #   api_key: "vllm"

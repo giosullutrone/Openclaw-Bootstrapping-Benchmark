@@ -1,0 +1,4 @@
+pexpect
+pyyaml
+rich
+dataclasses-json
