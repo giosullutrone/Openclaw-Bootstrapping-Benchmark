@@ -4,6 +4,12 @@ Automated benchmark suite that tests whether **local LLM models** can
 successfully complete the [OpenClaw](https://github.com/openclaw/openclaw)
 bootstrapping (first-run identity ritual) process — in a **single prompt**.
 
+Each model is tested across multiple prompt variants (natural/structured ×
+guided/unguided) over several independent runs, and results are averaged to
+produce a reliability score. The suite handles the full lifecycle
+automatically: environment isolation, OpenClaw installation, onboarding,
+gateway startup, bootstrap conversation, file verification, and reporting.
+
 ## Benchmark results
 
 <!-- BENCHMARK RESULTS -->
