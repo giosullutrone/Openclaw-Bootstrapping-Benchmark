@@ -291,7 +291,7 @@ def generate_results_markdown(
     results: list[AggregatedResult],
     openclaw_version: str = "unknown",
 ) -> str:
-    """Return a markdown table summarising the benchmark results."""
+    """Return markdown tables summarising the benchmark results (one per prompt variant)."""
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     # Determine runs count for the header
@@ -301,10 +301,6 @@ def generate_results_markdown(
         if len(run_counts) == 1
         else "variable runs per model"
     )
-
-    # Check if we have multiple prompt variants
-    variant_names = sorted({ag.prompt_variant for ag in results})
-    has_variants = len(variant_names) > 1 or (len(variant_names) == 1 and variant_names[0] != "default")
 
     version_note = f" · OpenClaw **{openclaw_version}**" if openclaw_version != "unknown" else ""
 
@@ -316,21 +312,6 @@ def generate_results_markdown(
         f"",
     ]
 
-    if has_variants:
-        lines.append(
-            "| Model | Variant | Runs | Avg Score | Perfect | BOOTSTRAP | IDENTITY | USER | SOUL | Avg Duration |"
-        )
-        lines.append(
-            "|-------|---------|:----:|:---------:|:-------:|:---------:|:--------:|:----:|:----:|-------------:|"
-        )
-    else:
-        lines.append(
-            "| Model | Runs | Avg Score | Perfect | BOOTSTRAP | IDENTITY | USER | SOUL | Avg Duration |"
-        )
-        lines.append(
-            "|-------|:----:|:---------:|:-------:|:---------:|:--------:|:----:|:----:|-------------:|"
-        )
-
     def _rate(r: float) -> str:
         if r == 1.0:
             return "✅"
@@ -338,23 +319,36 @@ def generate_results_markdown(
             return "❌"
         return f"{r:.0%}"
 
+    # Group results by prompt variant
+    from collections import defaultdict
+    by_variant: dict[str, list[AggregatedResult]] = defaultdict(list)
     for ag in results:
-        score_pct = f"{ag.avg_score:.0%}"
-        dur = f"{ag.avg_duration_s:.1f}s"
-        if has_variants:
-            lines.append(
-                f"| {ag.model_name} "
-                f"| {ag.prompt_variant} "
-                f"| {ag.num_runs} "
-                f"| {score_pct} "
-                f"| {_rate(ag.perfect_rate)} "
-                f"| {_rate(ag.bootstrap_md_rate)} "
-                f"| {_rate(ag.identity_rate)} "
-                f"| {_rate(ag.user_rate)} "
-                f"| {_rate(ag.soul_rate)} "
-                f"| {dur} |"
-            )
-        else:
+        by_variant[ag.prompt_variant].append(ag)
+
+    # Sort variants alphabetically
+    sorted_variants = sorted(by_variant.keys())
+
+    # Generate a table for each variant
+    for variant_name in sorted_variants:
+        variant_results = by_variant[variant_name]
+        
+        # Variant heading
+        if variant_name != "default":
+            lines.append(f"#### {variant_name}")
+            lines.append("")
+
+        # Table header
+        lines.append(
+            "| Model | Runs | Avg Score | Perfect | BOOTSTRAP | IDENTITY | USER | SOUL | Avg Duration |"
+        )
+        lines.append(
+            "|-------|:----:|:---------:|:-------:|:---------:|:--------:|:----:|:----:|-------------:|"
+        )
+
+        # Table rows
+        for ag in variant_results:
+            score_pct = f"{ag.avg_score:.0%}"
+            dur = f"{ag.avg_duration_s:.1f}s"
             lines.append(
                 f"| {ag.model_name} "
                 f"| {ag.num_runs} "
@@ -367,22 +361,22 @@ def generate_results_markdown(
                 f"| {dur} |"
             )
 
-    # Legend
-    total = len(results)
-    perfect = sum(1 for ag in results if ag.perfect_rate == 1.0)
-    lines.append("")
-    lines.append(
-        f"**{perfect}/{total}** models completed the bootstrap perfectly in every run."
-    )
-    lines.append("")
+        # Variant summary
+        perfect = sum(1 for ag in variant_results if ag.perfect_rate == 1.0)
+        total = len(variant_results)
+        lines.append("")
+        lines.append(
+            f"**{perfect}/{total}** models completed the bootstrap perfectly in every run."
+        )
+        lines.append("")
+
+    # Legend (once at the end)
     lines.append(
         "<details><summary>Column legend</summary>"
     )
     lines.append("")
     lines.append("| Column | Meaning |")
     lines.append("|--------|---------|")
-    if has_variants:
-        lines.append("| **Variant** | Prompt variant: *natural-guided*, *natural-unguided*, *structured-guided*, or *structured-unguided* |")
     lines.append("| **Runs** | Number of independent runs (each from a fresh environment) |")
     lines.append("| **Avg Score** | Average percentage of checks passed across all runs |")
     lines.append("| **Perfect** | Fraction of runs where all 4 checks passed (✅ = 100%) |")
