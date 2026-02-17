@@ -46,6 +46,35 @@
 # Each variant's value is a YAML list of prompt strings — use
 # a single entry for a one-shot benchmark.
 #
+# Prompts support {placeholder} substitution from the
+# bootstrap_fields section below.  Available placeholders:
+#   {user_name}  {user_timezone}  {user_preferences}
+#   {agent_name}  {agent_creature}  {agent_vibe}  {agent_emoji}
+#
+
+
+# ─── Bootstrap fields ────────────────────────────────────────
+#
+# Values injected into the prompt templates above **and** used
+# by the post-bootstrap verification to check that the model
+# wrote the correct data into the workspace files.
+#
+# Change these to test with different identities — the prompts
+# and the checks will automatically stay in sync.
+#
+bootstrap_fields:
+  # User info (verified in USER.md)
+  user_name: "Alex"
+  user_timezone: "Europe/Rome"
+  user_preferences: "concise answers, no filler, direct and helpful"
+
+  # Agent info (verified in IDENTITY.md)
+  agent_name: "Coral"
+  agent_creature: "space lobster"
+  agent_vibe: "warm and casual"
+  agent_emoji: "🦞"
+
+
 prompt_variants:
 
   # ── Natural + Guided ───────────────────────────────────────
@@ -57,11 +86,12 @@ prompt_variants:
       can skip the back-and-forth. Here's who I am and who I'd like you
       to be:
 
-      I'm Alex, based in Europe/Rome. I like my answers concise and
-      direct — no filler, no fluff, just helpful and to the point.
+      I'm {user_name}, based in {user_timezone}. I like my answers
+      {user_preferences}.
 
-      For your identity, I'd like you to go by Coral. You're a space
-      lobster with a warm, casual vibe, and your emoji is 🦞.
+      For your identity, I'd like you to go by {agent_name}. You're a
+      {agent_creature} with a {agent_vibe} vibe, and your emoji is
+      {agent_emoji}.
 
       Please take all of this and write it into the right places:
       put your identity details (name, creature, vibe, emoji) in
@@ -79,11 +109,12 @@ prompt_variants:
       Hi! I'd love to get started. Here's a bit about me and how I'd
       like things to work:
 
-      My name is Alex and I'm in the Europe/Rome timezone. I prefer
-      concise, direct answers without unnecessary padding.
+      My name is {user_name} and I'm in the {user_timezone} timezone.
+      I prefer {user_preferences}.
 
-      As for you, I'd like you to call yourself Coral. You're a space
-      lobster — warm and casual in tone, and your emoji is 🦞.
+      As for you, I'd like you to call yourself {agent_name}. You're a
+      {agent_creature} — {agent_vibe} in tone, and your emoji is
+      {agent_emoji}.
 
       That should be everything you need to get going. Take it from
       here!
@@ -95,15 +126,15 @@ prompt_variants:
       Here is everything you need to complete the bootstrap setup:
 
       **About me (the user):**
-      - Name: Alex
-      - Timezone: Europe/Rome
-      - Preferences: concise answers, no filler, direct and helpful
+      - Name: {user_name}
+      - Timezone: {user_timezone}
+      - Preferences: {user_preferences}
 
       **About you (the agent):**
-      - Name: Coral
-      - Creature: space lobster
-      - Vibe: warm and casual
-      - Emoji: 🦞
+      - Name: {agent_name}
+      - Creature: {agent_creature}
+      - Vibe: {agent_vibe}
+      - Emoji: {agent_emoji}
 
       Please write all of this to the appropriate files: identity
       details in IDENTITY.md, user info in USER.md, and update
@@ -118,15 +149,15 @@ prompt_variants:
       Here is the information for the initial setup:
 
       **User:**
-      - Name: Alex
-      - Timezone: Europe/Rome
-      - Preferences: concise answers, no filler, direct and helpful
+      - Name: {user_name}
+      - Timezone: {user_timezone}
+      - Preferences: {user_preferences}
 
       **Agent:**
-      - Name: Coral
-      - Creature: space lobster
-      - Vibe: warm and casual
-      - Emoji: 🦞
+      - Name: {agent_name}
+      - Creature: {agent_creature}
+      - Vibe: {agent_vibe}
+      - Emoji: {agent_emoji}
 
 
 # ─── Timing & retry settings ─────────────────────────────────
@@ -233,7 +264,6 @@ models:
     model_id: "glm-4.7-flash:bf16"
     api_key: "${OLLAMA_API_KEY:-ollama}"
     compatibility: "openai"
-    # context_window: 131072  # auto-detected from Ollama; uncomment to override
 
   - name: "glm-4.7-flash:latest"
     provider: "custom"
@@ -242,7 +272,6 @@ models:
     model_id: "glm-4.7-flash:latest"
     api_key: "${OLLAMA_API_KEY:-ollama}"
     compatibility: "openai"
-    # context_window: 131072
 
   - name: "qwen3-coder-next:q8_0"
     provider: "custom"
@@ -251,7 +280,6 @@ models:
     model_id: "qwen3-coder-next:q8_0"
     api_key: "${OLLAMA_API_KEY:-ollama}"
     compatibility: "openai"
-    # context_window: 131072
 
   - name: "qwen3-coder-next:latest"
     provider: "custom"
@@ -260,7 +288,6 @@ models:
     model_id: "qwen3-coder-next:latest"
     api_key: "${OLLAMA_API_KEY:-ollama}"
     compatibility: "openai"
-    # context_window: 131072
 
   - name: "gpt-oss:20b"
     provider: "custom"
@@ -269,7 +296,22 @@ models:
     model_id: "gpt-oss:20b"
     api_key: "${OLLAMA_API_KEY:-ollama}"
     compatibility: "openai"
-    # context_window: 131072
+
+  - name: "ministral-3:14b-instruct-2512-fp16"
+    provider: "custom"
+    auth_choice: "custom-api-key"
+    base_url: "http://localhost:11434/v1"
+    model_id: "ministral-3:14b-instruct-2512-fp16"
+    api_key: "${OLLAMA_API_KEY:-ollama}"
+    compatibility: "openai"
+
+  - name: "ministral-3:14b"
+    provider: "custom"
+    auth_choice: "custom-api-key"
+    base_url: "http://localhost:11434/v1"
+    model_id: "ministral-3:14b"
+    api_key: "${OLLAMA_API_KEY:-ollama}"
+    compatibility: "openai"
 
   # ── Examples for other servers ─────────────────────────────
   #

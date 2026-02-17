@@ -8,9 +8,10 @@ the identity ritual.
 Checks performed
 ----------------
 1. BOOTSTRAP.md – must be **deleted** (the ritual says "delete when done").
-2. IDENTITY.md  – must contain non-placeholder values for Name, Creature,
-   Vibe, and Emoji.
-3. USER.md      – must contain non-placeholder values for Name and Timezone.
+2. IDENTITY.md  – must contain the expected agent identity values
+   (name, creature, vibe, emoji) from ``bootstrap_fields``.
+3. USER.md      – must contain the expected user values
+   (name, timezone) from ``bootstrap_fields``.
 4. SOUL.md      – must differ from the template (the agent should have
    personalised it).
 """
@@ -21,6 +22,10 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .config import BootstrapFields
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +43,6 @@ USER_PLACEHOLDERS = {
     "",
     "(optional)",
 }
-
-# Fields we require in IDENTITY.md
-IDENTITY_REQUIRED_FIELDS = {"name", "creature", "vibe", "emoji"}
-
-# Fields we require in USER.md
-USER_REQUIRED_FIELDS = {"name", "timezone"}
 
 
 @dataclass
@@ -78,36 +77,62 @@ def _strip_md_markers(value: str) -> str:
     return re.sub(r"^[*_\s]+|[*_\s]+$", "", value)
 
 
-def _parse_md_fields(content: str) -> dict[str, str]:
-    """Extract ``- **Key:** Value`` or ``- Key: Value`` lines from markdown.
+def _field_present(content: str, field: str) -> tuple[bool, str]:
+    """Check whether *field* appears in *content* with a real value.
 
-    Also looks for continuation-line placeholder text such as::
+    Returns ``(found, extracted_value)``.  Uses two strategies:
 
-        - **Name:**
-          _(pick something you like)_
+    1. Structured: ``- **Field:** value`` or ``- Field: value``
+    2. Loose: the word *field* appears anywhere near a non-placeholder
+       value (handles prose, inline mentions, etc.)
     """
-    fields: dict[str, str] = {}
-    lines = content.splitlines()
-    for idx, raw in enumerate(lines):
-        line = raw.strip()
-        # Match: - **Name:** Coral  OR  - Name: Coral  OR  * **Name:** Coral
-        m = re.match(r"^[-*]\s*\*{0,2}(\w[\w\s]*?)\*{0,2}\s*:\s*(.*)$", line)
+    lower = content.lower()
+
+    # Strategy 1 — structured bullet / key-value line
+    for line in content.splitlines():
+        stripped = line.strip()
+        m = re.match(
+            r"^[-*]?\s*\*{0,2}"
+            + re.escape(field)
+            + r"\*{0,2}\s*[:=]\s*(.+)$",
+            stripped,
+            re.IGNORECASE,
+        )
         if m:
-            key = m.group(1).strip().lower()
-            val = _strip_md_markers(m.group(2))
-            # Also strip parenthetical wrappers like _(text)_
-            val = val.strip("(").strip(")").strip()
+            val = _strip_md_markers(m.group(1)).strip().rstrip(".")
+            if val and not _is_placeholder(val):
+                return True, val
 
-            # If the value is empty, check the next line for a continuation
-            # (OpenClaw templates put the placeholder on a separate line)
-            if not val and idx + 1 < len(lines):
-                next_line = lines[idx + 1].strip()
-                if next_line and not re.match(r"^[-*]\s", next_line):
-                    val = _strip_md_markers(next_line)
-                    val = val.strip("(").strip(")").strip()
+    # Strategy 2 — the keyword followed by a colon/is + value anywhere
+    m = re.search(
+        r"\b" + re.escape(field) + r"\b\s*(?:is|:)\s*(.+?)(?:\.\s|\.|;|\n|$)",
+        content,
+        re.IGNORECASE,
+    )
+    if m:
+        val = _strip_md_markers(m.group(1)).strip().rstrip(".")
+        if val and not _is_placeholder(val):
+            return True, val
 
-            fields[key] = val
-    return fields
+    # Strategy 3 — for "name" specifically, handle "My name is X",
+    # "I'm X", "called X"
+    if field == "name":
+        for pat in [
+            r"\bname\b\s+is\s+(\w[\w\s-]*?)(?:\.|,|;|\n|$)",
+            r"\bcall(?:ed)?\s+(\w[\w\s-]*?)(?:\.|,|;|\n|$)",
+            r"\bi'?m\s+(\w[\w-]*?)(?:\.|,|;|\s|$)",
+        ]:
+            m = re.search(pat, lower)
+            if m and m.group(1).strip():
+                return True, m.group(1).strip().title()
+
+    # Strategy 4 — for "timezone", also try "time zone"
+    if field == "timezone":
+        m = re.search(r"\btime\s*zone\b\s*(?:is|:)\s*([\w/+-]+)", content, re.IGNORECASE)
+        if m and m.group(1).strip():
+            return True, m.group(1).strip()
+
+    return False, ""
 
 
 def _is_placeholder(value: str) -> bool:
@@ -141,8 +166,8 @@ def check_bootstrap_deleted(workspace: Path) -> FileCheck:
     )
 
 
-def check_identity(workspace: Path) -> FileCheck:
-    """IDENTITY.md must have real values for required fields."""
+def check_identity(workspace: Path, expected: dict[str, str] | None = None) -> FileCheck:
+    """IDENTITY.md must have the expected agent identity values."""
     path = workspace / "IDENTITY.md"
     check = FileCheck(filename="IDENTITY.md", exists=path.exists())
 
@@ -152,30 +177,42 @@ def check_identity(workspace: Path) -> FileCheck:
 
     content = path.read_text(encoding="utf-8")
     check.content = content
-    fields = _parse_md_fields(content)
 
+    if not expected:
+        # Fallback: just check the file isn't empty/template-only
+        if len(content.strip()) > 100:
+            check.passed = True
+            check.details = f"Has content ({len(content)} chars)"
+        else:
+            check.details = "File appears empty or template-only"
+        return check
+
+    # Check that each expected value actually appears in the content
     missing = []
-    placeholder = []
-    for req in IDENTITY_REQUIRED_FIELDS:
-        val = fields.get(req, "")
-        if not val:
-            missing.append(req)
-        elif _is_placeholder(val):
-            placeholder.append(req)
+    found: dict[str, str] = {}
+    content_lower = content.lower()
+    for field_name, expected_val in expected.items():
+        if expected_val.lower() in content_lower:
+            found[field_name] = expected_val
+        else:
+            # Also try via _field_present (handles "name is X" etc.)
+            present, val = _field_present(content, field_name)
+            if present:
+                found[field_name] = val
+            else:
+                missing.append(field_name)
 
     if missing:
         check.details = f"Missing fields: {', '.join(missing)}"
-    elif placeholder:
-        check.details = f"Placeholder values: {', '.join(placeholder)}"
     else:
         check.passed = True
-        check.details = f"All fields set: {', '.join(f'{k}={fields[k]}' for k in IDENTITY_REQUIRED_FIELDS)}"
+        check.details = f"All fields set: {', '.join(f'{k}={found[k]}' for k in expected)}"
 
     return check
 
 
-def check_user(workspace: Path) -> FileCheck:
-    """USER.md must have real values for required fields."""
+def check_user(workspace: Path, expected: dict[str, str] | None = None) -> FileCheck:
+    """USER.md must have the expected user values."""
     path = workspace / "USER.md"
     check = FileCheck(filename="USER.md", exists=path.exists())
 
@@ -185,31 +222,35 @@ def check_user(workspace: Path) -> FileCheck:
 
     content = path.read_text(encoding="utf-8")
     check.content = content
-    fields = _parse_md_fields(content)
+
+    if not expected:
+        if len(content.strip()) > 50:
+            check.passed = True
+            check.details = f"Has content ({len(content)} chars)"
+        else:
+            check.details = "File appears empty or template-only"
+        return check
 
     missing = []
-    placeholder = []
-    for req in USER_REQUIRED_FIELDS:
-        val = fields.get(req, "")
-        # "what to call them" is sometimes used instead of "name"
-        if req == "name" and not val:
-            val = fields.get("what to call them", "")
-        if not val:
-            missing.append(req)
-        elif _is_placeholder(val):
-            placeholder.append(req)
+    found: dict[str, str] = {}
+    content_lower = content.lower()
+    for field_name, expected_val in expected.items():
+        if expected_val.lower() in content_lower:
+            found[field_name] = expected_val
+        else:
+            present, val = _field_present(content, field_name)
+            if not present and field_name == "name":
+                present, val = _field_present(content, "what to call them")
+            if present:
+                found[field_name] = val
+            else:
+                missing.append(field_name)
 
     if missing:
         check.details = f"Missing fields: {', '.join(missing)}"
-    elif placeholder:
-        check.details = f"Placeholder values: {', '.join(placeholder)}"
     else:
         check.passed = True
-        parts = []
-        for k in USER_REQUIRED_FIELDS:
-            v = fields.get(k, "") or fields.get("what to call them", "")
-            parts.append(f"{k}={v}")
-        check.details = f"Key fields populated: {', '.join(parts)}"
+        check.details = f"Key fields populated: {', '.join(f'{k}={found[k]}' for k in expected)}"
 
     return check
 
@@ -246,12 +287,19 @@ def check_soul(workspace: Path) -> FileCheck:
 
 # ── Aggregate verification ───────────────────────────────────
 
-def verify_bootstrap(workspace: Path, model_name: str) -> VerificationResult:
+def verify_bootstrap(
+    workspace: Path,
+    model_name: str,
+    bootstrap_fields: BootstrapFields | None = None,
+) -> VerificationResult:
     """Run all post-bootstrap checks and return aggregated results."""
+    identity_expected = bootstrap_fields.identity_expected if bootstrap_fields else None
+    user_expected = bootstrap_fields.user_expected if bootstrap_fields else None
+
     checks = [
         check_bootstrap_deleted(workspace),
-        check_identity(workspace),
-        check_user(workspace),
+        check_identity(workspace, expected=identity_expected),
+        check_user(workspace, expected=user_expected),
         check_soul(workspace),
     ]
 

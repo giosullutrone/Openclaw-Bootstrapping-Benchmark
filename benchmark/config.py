@@ -101,6 +101,69 @@ class GatewayConfig:
 
 
 @dataclass
+class BootstrapFields:
+    """Expected field values injected into prompt templates and verified
+    in the post-bootstrap checks.
+
+    Prompt templates reference these as ``{user_name}``, ``{agent_emoji}``, etc.
+    """
+
+    # User fields (checked in USER.md)
+    user_name: str = "Alex"
+    user_timezone: str = "Europe/Rome"
+    user_preferences: str = "concise answers, no filler, direct and helpful"
+
+    # Agent fields (checked in IDENTITY.md)
+    agent_name: str = "Coral"
+    agent_creature: str = "space lobster"
+    agent_vibe: str = "warm and casual"
+    agent_emoji: str = "\U0001f99e"  # 🦞
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> BootstrapFields:
+        return cls(
+            user_name=str(d.get("user_name", cls.user_name)),
+            user_timezone=str(d.get("user_timezone", cls.user_timezone)),
+            user_preferences=str(d.get("user_preferences", cls.user_preferences)),
+            agent_name=str(d.get("agent_name", cls.agent_name)),
+            agent_creature=str(d.get("agent_creature", cls.agent_creature)),
+            agent_vibe=str(d.get("agent_vibe", cls.agent_vibe)),
+            agent_emoji=str(d.get("agent_emoji", cls.agent_emoji)),
+        )
+
+    def as_template_vars(self) -> dict[str, str]:
+        """Return a dict suitable for ``str.format_map()``."""
+        return {
+            "user_name": self.user_name,
+            "user_timezone": self.user_timezone,
+            "user_preferences": self.user_preferences,
+            "agent_name": self.agent_name,
+            "agent_creature": self.agent_creature,
+            "agent_vibe": self.agent_vibe,
+            "agent_emoji": self.agent_emoji,
+        }
+
+    # Convenience accessors for verify.py
+    @property
+    def identity_expected(self) -> dict[str, str]:
+        """Field-name → expected value for IDENTITY.md checks."""
+        return {
+            "name": self.agent_name,
+            "creature": self.agent_creature,
+            "vibe": self.agent_vibe,
+            "emoji": self.agent_emoji,
+        }
+
+    @property
+    def user_expected(self) -> dict[str, str]:
+        """Field-name → expected value for USER.md checks."""
+        return {
+            "name": self.user_name,
+            "timezone": self.user_timezone,
+        }
+
+
+@dataclass
 class PromptVariant:
     """A named prompt variant (e.g. 'guided' or 'unguided')."""
 
@@ -120,6 +183,7 @@ class BenchmarkConfig:
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     openclaw_home: str = ""
     models: list[ModelConfig] = field(default_factory=list)
+    bootstrap_fields: BootstrapFields = field(default_factory=BootstrapFields)
 
     # Legacy accessor — returns the first variant's prompts (or empty list)
     @property
@@ -147,17 +211,31 @@ class BenchmarkConfig:
         raw_variants = d.get("prompt_variants", {})
         variants: list[PromptVariant] = []
 
+        # Parse bootstrap_fields first so we can interpolate prompts
+        bf = BootstrapFields.from_dict(d.get("bootstrap_fields", {}))
+        tpl_vars = bf.as_template_vars()
+
+        def _interpolate_prompts(prompts: list[str]) -> list[str]:
+            """Replace {field} placeholders in prompt templates."""
+            result = []
+            for p in prompts:
+                try:
+                    result.append(p.format_map(tpl_vars))
+                except KeyError:
+                    result.append(p)  # leave unresolvable templates as-is
+            return result
+
         if raw_variants and isinstance(raw_variants, dict):
             for name, prompts in raw_variants.items():
                 if isinstance(prompts, list):
-                    variants.append(PromptVariant(name=name, prompts=prompts))
+                    variants.append(PromptVariant(name=name, prompts=_interpolate_prompts(prompts)))
                 elif isinstance(prompts, str):
-                    variants.append(PromptVariant(name=name, prompts=[prompts]))
+                    variants.append(PromptVariant(name=name, prompts=_interpolate_prompts([prompts])))
         elif "bootstrap_prompts" in d:
             # Legacy format: treat as a single unnamed variant
             bp = d["bootstrap_prompts"]
             if isinstance(bp, list):
-                variants.append(PromptVariant(name="default", prompts=bp))
+                variants.append(PromptVariant(name="default", prompts=_interpolate_prompts(bp)))
 
         return cls(
             prompt_variants=variants,
@@ -171,6 +249,7 @@ class BenchmarkConfig:
             ),
             openclaw_home=d.get("openclaw_home", ""),
             models=[ModelConfig.from_dict(m) for m in d.get("models", [])],
+            bootstrap_fields=bf,
         )
 
 

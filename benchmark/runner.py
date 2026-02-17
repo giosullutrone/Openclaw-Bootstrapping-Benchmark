@@ -157,7 +157,7 @@ def run_single_model(
 
         # 6. Verify
         console.print("[dim]Verifying workspace files …[/dim]")
-        verification = verify_bootstrap(env.workspace_dir, model.model_id)
+        verification = verify_bootstrap(env.workspace_dir, model.model_id, cfg.bootstrap_fields)
 
         console.print(f"\n[bold]{verification.summary}[/bold]\n")
         return bootstrap_result, verification
@@ -245,8 +245,10 @@ def run_benchmark(
         detected = early_env.detect_openclaw_version()
         if detected != "unknown":
             _openclaw_version = detected
-            console.print(f"[dim]OpenClaw version: {_openclaw_version}[/dim]")
         early_env.cleanup()
+
+        if _openclaw_version != "unknown":
+            console.print(f"[dim]OpenClaw version: {_openclaw_version}[/dim]")
 
     n_runs = max(1, cfg.runs_per_model)
 
@@ -283,27 +285,22 @@ def run_benchmark(
     aggregated: list[AggregatedResult] = []
 
     for model in cfg.models:
-        # Warm up: send a tiny request to force the provider to load
-        # the model into memory and verify the API is reachable.
-        console.print(
-            f"\n[dim]Warming up {model.model_id} …[/dim]"
-        )
-        if warm_up_model(model):
-            console.print(f"[green]✓[/green] [dim]{model.model_id} is loaded and responding[/dim]")
-        else:
-            console.print(
-                f"[yellow]⚠ Warm-up failed for {model.model_id} — "
-                f"the model may not be available. Proceeding anyway.[/yellow]"
-            )
+        variants_to_run = list(cfg.prompt_variants or [PromptVariant(name="default", prompts=cfg.bootstrap_prompts)])
 
-        for variant in (cfg.prompt_variants or [PromptVariant(name="default", prompts=cfg.bootstrap_prompts)]):
-            # ── Skip-completed check ─────────────────────────
-            if skip_completed:
+        # ── Skip-completed check (before warm-up) ────────────
+        # Determine which variants can be skipped and which need
+        # re-running, so we avoid warming up a model unnecessarily.
+        skipped_variants: set[str] = set()
+        if skip_completed:
+            for variant in variants_to_run:
                 prev_key = (model.model_id, variant.name)
                 prev_entry = _prev_lookup.get(prev_key)
                 if prev_entry is not None:
                     prev_prompts = prev_entry.get("prompt_variant_prompts", [])
-                    version_match = (_prev_version == _openclaw_version)
+                    version_match = (
+                        _openclaw_version == "unknown"
+                        or _prev_version == _openclaw_version
+                    )
                     prompts_match = (prev_prompts == variant.prompts)
 
                     if version_match and prompts_match:
@@ -314,7 +311,7 @@ def run_benchmark(
                         # Carry over the previous AggregatedResult
                         ag = AggregatedResult(
                             model_name=prev_entry["model"],
-                            runs=[],  # raw runs not reconstructed
+                            runs=[],
                             prompt_variant=prev_entry["prompt_variant"],
                             prompt_variant_prompts=prev_entry.get("prompt_variant_prompts", []),
                             _raw_runs_json=prev_entry.get("runs", []),
@@ -329,9 +326,8 @@ def run_benchmark(
                             soul_rate=prev_entry.get("per_check_rates", {}).get("SOUL.md", 0.0),
                         )
                         aggregated.append(ag)
-                        continue
+                        skipped_variants.add(variant.name)
                     else:
-                        # Mismatch — warn but re-run
                         reasons = []
                         if not version_match:
                             reasons.append(
@@ -345,6 +341,27 @@ def run_benchmark(
                             f"in latest results but {' and '.join(reasons)} — "
                             f"re-running[/yellow]"
                         )
+
+        # If every variant was skipped, skip the model entirely
+        if len(skipped_variants) == len(variants_to_run):
+            continue
+
+        # Warm up: send a tiny request to force the provider to load
+        # the model into memory and verify the API is reachable.
+        console.print(
+            f"\n[dim]Warming up {model.model_id} …[/dim]"
+        )
+        if warm_up_model(model):
+            console.print(f"[green]✓[/green] [dim]{model.model_id} is loaded and responding[/dim]")
+        else:
+            console.print(
+                f"[yellow]⚠ Warm-up failed for {model.model_id} — "
+                f"the model may not be available. Proceeding anyway.[/yellow]"
+            )
+
+        for variant in variants_to_run:
+            if variant.name in skipped_variants:
+                continue
 
             model_runs: list[tuple[BootstrapResult, VerificationResult]] = []
 
